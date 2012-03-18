@@ -28,7 +28,9 @@ class LinterPlugin(val global: Global) extends Plugin {
   val name = "linter"
   val description = ""
   val components = List[PluginComponent](LinterComponent)
-  var warningEnabled = (_: Warnings.Warning) => true
+  var warningActions = (_: Warnings.Warning) => Actions.Warn
+
+  def warningEnabled(warning: Warnings.Warning) = warningActions(warning) != Actions.NoAction
 
   object Warnings extends Enumeration {
     type Warning = Value
@@ -36,6 +38,13 @@ class LinterPlugin(val global: Global) extends Plugin {
         OptionGet,
         UnsafeContains,
         UnsafeEquals = Value
+  }
+
+  object Actions extends Enumeration {
+    type Action = Value
+    val NoAction,
+        Warn,
+        Error = Value
   }
 
   val OptionConfig = "config:"
@@ -69,10 +78,21 @@ class LinterPlugin(val global: Global) extends Plugin {
         return
     }
 
-    warningEnabled =
-      Warnings.values.foldLeft(Map.empty[Warnings.Warning, Boolean]) { (warningConfig, warning) =>
-        // Anything other than "false" is treated as enabling the warning
-        warningConfig + (warning -> !(props.getProperty("check." + underscoreify(warning.toString), "true") == "false"))
+    val NoAction = underscoreify(Actions.NoAction.toString)
+    val Warn = underscoreify(Actions.Warn.toString)
+    val Error = underscoreify(Actions.Error.toString)
+
+    warningActions =
+      Warnings.values.foldLeft(Map.empty[Warnings.Warning, Actions.Action]) { (warningConfig, warning) =>
+        val action = props.getProperty("check." + underscoreify(warning.toString), Warn) match {
+          case NoAction => Actions.NoAction
+          case Warn => Actions.Warn
+          case Error => Actions.Error
+          case other =>
+            error("Unknown action for warning " + warning + ": " + other)
+            return
+        }
+        warningConfig + (warning -> action)
       }
   }
 
@@ -102,6 +122,11 @@ class LinterPlugin(val global: Global) extends Plugin {
       val SeqLikeContains: Symbol = SeqLikeClass.info.member(newTermName("contains"))
       val OptionGet: Symbol = OptionClass.info.member(nme.get)
 
+      def onWarn(w: Warnings.Warning) = {
+        if(warningActions(w) == Actions.Error) unit.error _
+        else unit.warning _
+      }
+
       def SeqMemberType(seenFrom: Type): Type = {
         SeqLikeClass.tpe.typeArgs.head.asSeenFrom(seenFrom, SeqLikeClass)
       }
@@ -122,21 +147,21 @@ class LinterPlugin(val global: Global) extends Plugin {
         case Apply(eqeq @ Select(lhs, nme.EQ), List(rhs))
             if warningEnabled(Warnings.UnsafeEquals) && methodImplements(eqeq.symbol, Object_==) && !(isSubtype(lhs, rhs) || isSubtype(rhs, lhs)) =>
           val warnMsg = "Comparing with == on instances of different types (%s, %s) will probably return false."
-          unit.warning(eqeq.pos, warnMsg.format(lhs.tpe.widen, rhs.tpe.widen))
+          onWarn(Warnings.UnsafeEquals)(eqeq.pos, warnMsg.format(lhs.tpe.widen, rhs.tpe.widen))
 
         case Import(pkg, selectors)
             if warningEnabled(Warnings.JavaConversions) && pkg.symbol == JavaConversionsModule && selectors.exists(isGlobalImport) =>
-          unit.warning(pkg.pos, "Conversions in scala.collection.JavaConversions._ are dangerous.")
+          onWarn(Warnings.JavaConversions)(pkg.pos, "Conversions in scala.collection.JavaConversions._ are dangerous.")
 
         case Apply(contains @ Select(seq, _), List(target))
             if warningEnabled(Warnings.UnsafeContains) && methodImplements(contains.symbol, SeqLikeContains) && !(target.tpe <:< SeqMemberType(seq.tpe)) =>
           val warnMsg = "SeqLike[%s].contains(%s) will probably return false."
-          unit.warning(contains.pos, warnMsg.format(SeqMemberType(seq.tpe), target.tpe.widen))
+          onWarn(Warnings.UnsafeContains)(contains.pos, warnMsg.format(SeqMemberType(seq.tpe), target.tpe.widen))
 
         case get @ Select(_, nme.get)
             if warningEnabled(Warnings.OptionGet) && methodImplements(get.symbol, OptionGet) =>
           if (!get.pos.source.path.contains("src/test")) {
-            unit.warning(get.pos, "Calling .get on Option will throw an exception if the Option is None.")
+            onWarn(Warnings.OptionGet)(get.pos, "Calling .get on Option will throw an exception if the Option is None.")
           }
 
         case _ =>

@@ -37,7 +37,7 @@ class LinterPluginTest extends SpecsMatchers {
     settings.bootclasspath.append(Source.fromURL(loader.getResource("boot.class.path")).mkString)
     settings.deprecation.value = true // enable detailed deprecation warnings
     settings.unchecked.value = true // enable detailed unchecked warnings
-    settings.Xwarnfatal.value = true // warnings cause compile failures too
+    settings.Xwarnfatal.value = false // but not this because we're testing the difference between error and warning
 
     val stringWriter = new StringWriter()
 
@@ -69,8 +69,8 @@ class LinterPluginTest extends SpecsMatchers {
       stringWriter.getBuffer.delete(0, stringWriter.getBuffer.length)
       val thunked = "() => { %s }".format(code)
       interpreter.interpret(thunked) match {
-        case Results.Success => None
-        case Results.Error => Some(stringWriter.toString)
+        case Results.Success if stringWriter.toString.indexOf("warning") == -1 => None
+        case Results.Success | Results.Error => Some(stringWriter.toString)
         case Results.Incomplete => throw new Exception("Incomplete code snippet")
       }
     }
@@ -112,15 +112,17 @@ class LinterPluginTest extends SpecsMatchers {
     check("""1 + 1""", None, List("notavalidconfigoption")) must throwA[InitializationException]
   }
 
-  def tripleTest(message: String, basename: String)(impltest: (Option[String], List[String]) => Unit): Unit = {
-    impltest(Some(message), Nil)
+  def multiTest(message: String, basename: String)(impltest: (Option[String], List[String]) => Unit): Unit = {
+    impltest(Some("warning: " + message), Nil)
     impltest(None, List("config:testprops/" + basename + "off.properties"))
-    impltest(Some(message), List("config:testprops/allbut" + basename + "off.properties"))
+    impltest(Some("error: " + message), List("config:testprops/" + basename + "error.properties"))
+    impltest(Some("warning: " + message), List("config:testprops/allbut" + basename + "off.properties"))
+    impltest(Some("warning: " + message), List("config:testprops/allbut" + basename + "error.properties"))
   }
 
   @Test
   def testHasVersusContains(): Unit = {
-    tripleTest("SeqLike[Int].contains(java.lang.String) will probably return false.", "unsafecontains") { (msg, options) =>
+    multiTest("SeqLike[Int].contains(java.lang.String) will probably return false.", "unsafecontains") { (msg, options) =>
       check("""val x = List(4); x.contains("foo")""", msg, options)
 
       // Set and Map have type-safe contains methods so we don't want to warn on
@@ -132,7 +134,7 @@ class LinterPluginTest extends SpecsMatchers {
 
   @Test
   def testNoOptionGet(): Unit = {
-    tripleTest("Calling .get on Option will throw an exception if the Option is None.", "optionget") { (msg, options) =>
+    multiTest("Calling .get on Option will throw an exception if the Option is None.", "optionget") { (msg, options) =>
       check("""Option(10).get""", msg, options)
       check("""val x: Option[Int] = None ; x.get""", msg, options)
       check("""val x: Option[Int] = Some(3); x.get""", msg, options)
@@ -145,14 +147,14 @@ class LinterPluginTest extends SpecsMatchers {
 
   @Test
   def testJavaConversionsImport(): Unit = {
-    tripleTest("Conversions in scala.collection.JavaConversions._ are dangerous.", "javaconversions") { (msg, options) =>
+    multiTest("Conversions in scala.collection.JavaConversions._ are dangerous.", "javaconversions") { (msg, options) =>
       check("import scala.collection.JavaConversions._;", msg, options)
     }
   }
 
   @Test
   def testUnsafeEquals(): Unit = {
-    tripleTest("Comparing with ==", "unsafeequals") { (msg, options) =>
+    multiTest("Comparing with ==", "unsafeequals") { (msg, options) =>
       // Should warn
       check("Nil == None", msg, options)
       check("""{
