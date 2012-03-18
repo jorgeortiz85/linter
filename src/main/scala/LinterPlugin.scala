@@ -32,14 +32,6 @@ class LinterPlugin(val global: Global) extends Plugin {
 
   def warningEnabled(warning: Warnings.Warning) = warningActions(warning) != Actions.NoAction
 
-  object Warnings extends Enumeration {
-    type Warning = Value
-    val JavaConversions,
-        OptionGet,
-        UnsafeContains,
-        UnsafeEquals = Value
-  }
-
   object Actions extends Enumeration {
     type Action = Value
     val NoAction,
@@ -122,57 +114,22 @@ class LinterPlugin(val global: Global) extends Plugin {
     }
 
     class LinterTraverser(unit: CompilationUnit) extends Traverser {
-      import definitions.{AnyClass, ObjectClass, Object_==, OptionClass, SeqClass}
+      val actions = List(new UnsafeEquals(global),
+                         new UnsafeContains(global),
+                         new OptionGet(global),
+                         new JavaConversions(global)).filter(a => warningEnabled(a.warning))
 
-      val JavaConversionsModule: Symbol = definitions.getModule("scala.collection.JavaConversions")
-      val SeqLikeClass: Symbol = definitions.getClass("scala.collection.SeqLike")
-      val SeqLikeContains: Symbol = SeqLikeClass.info.member(newTermName("contains"))
-      val OptionGet: Symbol = OptionClass.info.member(nme.get)
-
-      def onWarn(w: Warnings.Warning) = {
-        if(warningActions(w) == Actions.Error) unit.error _
-        else unit.warning _
-      }
-
-      def SeqMemberType(seenFrom: Type): Type = {
-        SeqLikeClass.tpe.typeArgs.head.asSeenFrom(seenFrom, SeqLikeClass)
-      }
-
-      def isSubtype(x: Tree, y: Tree): Boolean = {
-        x.tpe.widen <:< y.tpe.widen
-      }
-
-      def methodImplements(method: Symbol, target: Symbol): Boolean = {
-        method == target || method.allOverriddenSymbols.contains(target)
-      }
-
-      def isGlobalImport(selector: ImportSelector): Boolean = {
-        selector.name == nme.WILDCARD && selector.renamePos == -1
-      }
-
-      override def traverse(tree: Tree): Unit = tree match {
-        case Apply(eqeq @ Select(lhs, nme.EQ), List(rhs))
-            if warningEnabled(Warnings.UnsafeEquals) && methodImplements(eqeq.symbol, Object_==) && !(isSubtype(lhs, rhs) || isSubtype(rhs, lhs)) =>
-          val warnMsg = "Comparing with == on instances of different types (%s, %s) will probably return false."
-          onWarn(Warnings.UnsafeEquals)(eqeq.pos, warnMsg.format(lhs.tpe.widen, rhs.tpe.widen))
-
-        case Import(pkg, selectors)
-            if warningEnabled(Warnings.JavaConversions) && pkg.symbol == JavaConversionsModule && selectors.exists(isGlobalImport) =>
-          onWarn(Warnings.JavaConversions)(pkg.pos, "Conversions in scala.collection.JavaConversions._ are dangerous.")
-
-        case Apply(contains @ Select(seq, _), List(target))
-            if warningEnabled(Warnings.UnsafeContains) && methodImplements(contains.symbol, SeqLikeContains) && !(target.tpe <:< SeqMemberType(seq.tpe)) =>
-          val warnMsg = "SeqLike[%s].contains(%s) will probably return false."
-          onWarn(Warnings.UnsafeContains)(contains.pos, warnMsg.format(SeqMemberType(seq.tpe), target.tpe.widen))
-
-        case get @ Select(_, nme.get)
-            if warningEnabled(Warnings.OptionGet) && methodImplements(get.symbol, OptionGet) =>
-          if (!get.pos.source.path.contains("src/test")) {
-            onWarn(Warnings.OptionGet)(get.pos, "Calling .get on Option will throw an exception if the Option is None.")
-          }
-
-        case _ =>
-          super.traverse(tree)
+      override def traverse(tree: Tree): Unit = {
+        // I hate thes .asInstanceOfs.  But I cannot convince the
+        // compiler to thread the dependent types through!
+        actions.find(a => a.action.isDefinedAt(tree.asInstanceOf[a.global.Tree])) match {
+          case Some(action) =>
+            val (pos, msg) = action.action(tree.asInstanceOf[action.global.Tree])
+            if(warningActions(action.warning) == Actions.Error) unit.error(pos, msg)
+            else unit.warning(pos, msg)
+          case None =>
+            super.traverse(tree)
+        }
       }
     }
   }
