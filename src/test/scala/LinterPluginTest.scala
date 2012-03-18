@@ -181,4 +181,14 @@ class LinterPluginTest extends SpecsMatchers {
       }""", options = options)
     }
   }
+
+  @Test
+  def testDefaultNoAction(): Unit = {
+    check("Nil == None", None, List("config:testprops/defaultnoaction.properties"))
+  }
+
+  @Test
+  def testDefaultError(): Unit = {
+    check("Nil == None", Some("error: Comparing with =="), List("config:testprops/defaulterror.properties"))
+  }
 }

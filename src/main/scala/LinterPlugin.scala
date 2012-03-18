@@ -82,9 +82,16 @@ class LinterPlugin(val global: Global) extends Plugin {
     val Warn = underscoreify(Actions.Warn.toString)
     val Error = underscoreify(Actions.Error.toString)
 
+    val defaultAction = props.getProperty("default_action", Warn) match {
+      case action@(NoAction|Warn|Error) => action
+      case other =>
+        error("Unknown action for default_action: " + other)
+        return
+    }
+
     warningActions =
       Warnings.values.foldLeft(Map.empty[Warnings.Warning, Actions.Action]) { (warningConfig, warning) =>
-        val action = props.getProperty("check." + underscoreify(warning.toString), Warn) match {
+        val action = props.getProperty("check." + underscoreify(warning.toString), defaultAction) match {
           case NoAction => Actions.NoAction
           case Warn => Actions.Warn
           case Error => Actions.Error
