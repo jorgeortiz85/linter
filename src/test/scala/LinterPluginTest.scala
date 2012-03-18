@@ -22,7 +22,9 @@ import org.specs.SpecsMatchers
 class LinterPluginTest extends SpecsMatchers {
   var linterPlugin: LinterPlugin = null
 
-  class Compiler {
+  class InitializationException(message: String) extends Exception(message)
+
+  class Compiler(pluginOptions: List[String]) {
     import java.io.{PrintWriter, StringWriter}
     import scala.io.Source
     import scala.tools.nsc.{Global, Settings}
@@ -46,7 +48,16 @@ class LinterPluginTest extends SpecsMatchers {
         new Global(settings, reporter) {
           override protected def computeInternalPhases () {
             super.computeInternalPhases
-            linterPlugin = new LinterPlugin(this)
+            linterPlugin = new LinterPlugin(this) {
+              override def openPropertiesFile(filename: String) =
+                Option(getClass.getClassLoader.getResourceAsStream(filename)).getOrElse {
+                  throw new java.io.FileNotFoundException("No such file " + filename)
+                }
+            }
+
+            // is this the right place?
+            linterPlugin.processOptions(pluginOptions, msg => throw new InitializationException(msg))
+
             for (phase <- linterPlugin.components)
               phasesSet += phase
           }
@@ -65,11 +76,22 @@ class LinterPluginTest extends SpecsMatchers {
     }
   }
 
-  val compiler = new Compiler
-  def check(code: String, expectedError: Option[String] = None) {
+  val compilerCache = new scala.collection.mutable.HashMap[List[String], Compiler]
+  def compilerFor(options: List[String]): Compiler = {
+    compilerCache.get(options) match {
+      case Some(compiler) => compiler
+      case None =>
+        val compiler = new Compiler(options)
+        compilerCache += options -> compiler
+        compiler
+    }
+  }
+
+  def check(code: String, expectedError: Option[String] = None, options: List[String] = Nil) {
     // Either they should both be None or the expected error should be a
     // substring of the actual error.
-    (expectedError, compiler.compileAndLint(code)) must beLike {
+
+    (expectedError, compilerFor(options).compileAndLint(code)) must beLike {
       case (None, None) => true
       case (Some(exp), Some(act)) => act.contains(exp)
     }
@@ -81,64 +103,80 @@ class LinterPluginTest extends SpecsMatchers {
   }
 
   @Test
+  def nonExistantFileErrors(): Unit = {
+    check("""1 + 1""", None, List("config:thisfiledoesnotexistimsure")) must throwA[InitializationException]
+  }
+
+  @Test
+  def nonBadOptionFileErrors(): Unit = {
+    check("""1 + 1""", None, List("notavalidconfigoption")) must throwA[InitializationException]
+  }
+
+  def tripleTest(message: String, basename: String)(impltest: (Option[String], List[String]) => Unit): Unit = {
+    impltest(Some(message), Nil)
+    impltest(None, List("config:testprops/" + basename + "off.properties"))
+    impltest(Some(message), List("config:testprops/allbut" + basename + "off.properties"))
+  }
+
+  @Test
   def testHasVersusContains(): Unit = {
-    val msg = Some("SeqLike[Int].contains(java.lang.String) will probably return false.")
+    tripleTest("SeqLike[Int].contains(java.lang.String) will probably return false.", "unsafecontains") { (msg, options) =>
+      check("""val x = List(4); x.contains("foo")""", msg, options)
 
-    check("""val x = List(4); x.contains("foo")""", msg)
-
-    // Set and Map have type-safe contains methods so we don't want to warn on
-    // those.
-    check("""val x = Set(4); x.contains(3)""", None)
-    check("""val x = Map(4 -> 5); x.contains(3)""", None)
+      // Set and Map have type-safe contains methods so we don't want to warn on
+      // those.
+      check("""val x = Set(4); x.contains(3)""", options = options)
+      check("""val x = Map(4 -> 5); x.contains(3)""", options = options)
+    }
   }
 
   @Test
   def testNoOptionGet(): Unit = {
-    val msg = Some("Calling .get on Option will throw an exception if the Option is None.")
+    tripleTest("Calling .get on Option will throw an exception if the Option is None.", "optionget") { (msg, options) =>
+      check("""Option(10).get""", msg, options)
+      check("""val x: Option[Int] = None ; x.get""", msg, options)
+      check("""val x: Option[Int] = Some(3); x.get""", msg, options)
+      check("""val x = None ; x.get""", msg, options)
+      check("""val x = Some(3) ; x.get""", msg, options)
 
-    check("""Option(10).get""", msg)
-    check("""val x: Option[Int] = None ; x.get""", msg)
-    check("""val x: Option[Int] = Some(3); x.get""", msg)
-    check("""val x = None ; x.get""", msg)
-    check("""val x = Some(3) ; x.get""", msg)
-
-    check("""Map(1 -> "1", 2 -> "2").get(1)""")
+      check("""Map(1 -> "1", 2 -> "2").get(1)""", options = options)
+    }
   }
 
   @Test
   def testJavaConversionsImport(): Unit = {
-    val msg = Some("Conversions in scala.collection.JavaConversions._ are dangerous.")
-
-    check("import scala.collection.JavaConversions._;", msg)
+    tripleTest("Conversions in scala.collection.JavaConversions._ are dangerous.", "javaconversions") { (msg, options) =>
+      check("import scala.collection.JavaConversions._;", msg, options)
+    }
   }
 
   @Test
   def testUnsafeEquals(): Unit = {
-    val msg = Some("Comparing with ==")
+    tripleTest("Comparing with ==", "unsafeequals") { (msg, options) =>
+      // Should warn
+      check("Nil == None", msg, options)
+      check("""{
+        val x: List[Int] = Nil
+        val y: List[String] = Nil
+        x == y
+      }""", msg, options)
 
-    // Should warn
-    check("Nil == None", msg)
-    check("""{
-      val x: List[Int] = Nil
-      val y: List[String] = Nil
-      x == y
-    }""", msg)
-
-    // Should compile
-    check(""" "foo" == "bar" """)
-    check("""{
-      val x: List[Int] = Nil
-      val y: List[Int] = Nil
-      x == y
-    }""")
-    check("""{
-      val x: String = "foo"
-      val y: String = "bar"
-      x == y
-    }""")
-    check("""{
-      val x: String = "foo"
-      x == "bar"
-    }""")
+      // Should compile
+      check(""" "foo" == "bar" """, options = options)
+      check("""{
+        val x: List[Int] = Nil
+        val y: List[Int] = Nil
+        x == y
+      }""", options = options)
+      check("""{
+        val x: String = "foo"
+        val y: String = "bar"
+        x == y
+      }""", options = options)
+      check("""{
+        val x: String = "foo"
+        x == "bar"
+      }""", options = options)
+    }
   }
 }
