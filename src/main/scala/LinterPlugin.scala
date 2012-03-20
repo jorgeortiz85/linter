@@ -20,12 +20,83 @@ import scala.reflect.generic.Flags
 import scala.tools.nsc.{Global, Phase}
 import scala.tools.nsc.plugins.{Plugin, PluginComponent}
 
+import java.io.{InputStream, FileInputStream, IOException}
+
 class LinterPlugin(val global: Global) extends Plugin {
   import global._
 
   val name = "linter"
   val description = ""
   val components = List[PluginComponent](LinterComponent)
+  var warningActions = (_: Warnings.Warning) => Actions.Warn
+
+  def warningEnabled(warning: Warnings.Warning) = warningActions(warning) != Actions.NoAction
+
+  object Actions extends Enumeration {
+    type Action = Value
+    val NoAction,
+        Warn,
+        Error = Value
+  }
+
+  val OptionConfig = "config:"
+
+  override def processOptions(options: List[String], error: String => Unit) {
+    for(option <- options) {
+      if(option.startsWith(OptionConfig)) loadConfiguration(option.drop(OptionConfig.length), error)
+      else error("Unknown option: " + option)
+    }
+  }
+
+  private def underscoreify(camelCase: String): String = // not super-smart, but sufficient unto the purpose
+    camelCase.replaceAll("([A-Z])","_$1").toLowerCase.dropWhile(_ == '_')
+
+  private def loadConfiguration(filename: String, error: String => Unit) {
+    import java.util.Properties
+    import scala.collection.JavaConverters._
+
+    val props = new Properties
+
+    try {
+      val stream = openPropertiesFile(filename)
+      try {
+        props.load(stream)
+      } finally {
+        stream.close()
+      }
+    } catch {
+      case e: IOException =>
+        error("Exception occurred while loading properties file: " + e.getMessage)
+        return
+    }
+
+    val NoAction = underscoreify(Actions.NoAction.toString)
+    val Warn = underscoreify(Actions.Warn.toString)
+    val Error = underscoreify(Actions.Error.toString)
+
+    val defaultAction = props.getProperty("default_action", Warn) match {
+      case action@(NoAction|Warn|Error) => action
+      case other =>
+        error("Unknown action for default_action: " + other)
+        return
+    }
+
+    warningActions =
+      Warnings.values.foldLeft(Map.empty[Warnings.Warning, Actions.Action]) { (warningConfig, warning) =>
+        val action = props.getProperty("check." + underscoreify(warning.toString), defaultAction) match {
+          case NoAction => Actions.NoAction
+          case Warn => Actions.Warn
+          case Error => Actions.Error
+          case other =>
+            error("Unknown action for warning " + warning + ": " + other)
+            return
+        }
+        warningConfig + (warning -> action)
+      }
+  }
+
+  protected def openPropertiesFile(filename: String): InputStream =
+    new FileInputStream(filename)
 
   private object LinterComponent extends PluginComponent {
     import global._
@@ -43,51 +114,22 @@ class LinterPlugin(val global: Global) extends Plugin {
     }
 
     class LinterTraverser(unit: CompilationUnit) extends Traverser {
-      import definitions.{AnyClass, ObjectClass, Object_==, OptionClass, SeqClass}
+      val actions = List(new UnsafeEquals(global),
+                         new UnsafeContains(global),
+                         new OptionGet(global),
+                         new JavaConversions(global)).filter(a => warningEnabled(a.warning))
 
-      val JavaConversionsModule: Symbol = definitions.getModule("scala.collection.JavaConversions")
-      val SeqLikeClass: Symbol = definitions.getClass("scala.collection.SeqLike")
-      val SeqLikeContains: Symbol = SeqLikeClass.info.member(newTermName("contains"))
-      val OptionGet: Symbol = OptionClass.info.member(nme.get)
-
-      def SeqMemberType(seenFrom: Type): Type = {
-        SeqLikeClass.tpe.typeArgs.head.asSeenFrom(seenFrom, SeqLikeClass)
-      }
-
-      def isSubtype(x: Tree, y: Tree): Boolean = {
-        x.tpe.widen <:< y.tpe.widen
-      }
-
-      def methodImplements(method: Symbol, target: Symbol): Boolean = {
-        method == target || method.allOverriddenSymbols.contains(target)
-      }
-
-      def isGlobalImport(selector: ImportSelector): Boolean = {
-        selector.name == nme.WILDCARD && selector.renamePos == -1
-      }
-
-      override def traverse(tree: Tree): Unit = tree match {
-        case Apply(eqeq @ Select(lhs, nme.EQ), List(rhs))
-            if methodImplements(eqeq.symbol, Object_==) && !(isSubtype(lhs, rhs) || isSubtype(rhs, lhs)) =>
-          val warnMsg = "Comparing with == on instances of different types (%s, %s) will probably return false."
-          unit.warning(eqeq.pos, warnMsg.format(lhs.tpe.widen, rhs.tpe.widen))
-
-        case Import(pkg, selectors)
-            if pkg.symbol == JavaConversionsModule && selectors.exists(isGlobalImport) =>
-          unit.warning(pkg.pos, "Conversions in scala.collection.JavaConversions._ are dangerous.")
-
-        case Apply(contains @ Select(seq, _), List(target))
-            if methodImplements(contains.symbol, SeqLikeContains) && !(target.tpe <:< SeqMemberType(seq.tpe)) =>
-          val warnMsg = "SeqLike[%s].contains(%s) will probably return false."
-          unit.warning(contains.pos, warnMsg.format(SeqMemberType(seq.tpe), target.tpe.widen))
-
-        case get @ Select(_, nme.get) if methodImplements(get.symbol, OptionGet) =>
-          if (!get.pos.source.path.contains("src/test")) {
-            unit.warning(get.pos, "Calling .get on Option will throw an exception if the Option is None.")
-          }
-
-        case _ =>
-          super.traverse(tree)
+      override def traverse(tree: Tree): Unit = {
+        // I hate thes .asInstanceOfs.  But I cannot convince the
+        // compiler to thread the dependent types through!
+        actions.find(a => a.action.isDefinedAt(tree.asInstanceOf[a.global.Tree])) match {
+          case Some(action) =>
+            val (pos, msg) = action.action(tree.asInstanceOf[action.global.Tree])
+            if(warningActions(action.warning) == Actions.Error) unit.error(pos, msg)
+            else unit.warning(pos, msg)
+          case None =>
+            super.traverse(tree)
+        }
       }
     }
   }
