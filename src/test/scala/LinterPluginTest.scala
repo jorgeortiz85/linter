@@ -141,4 +141,32 @@ class LinterPluginTest extends SpecsMatchers {
       x == "bar"
     }""")
   }
+
+  @Test
+  def testCompanionObjectUsages(): Unit = {
+    val msg = Some("Using the companion object of a case class here is probably not what you intended. You probably meant some instance of the case class instead.")
+
+    // should warn
+    check("""(Some(5): Any) match {
+      case Some => 12
+      case None => 25
+    }
+    """, msg)
+
+    check("Some", msg)
+
+    check("""object Test {
+      case class Test2(i: Int)
+      Test2
+    }""", msg)
+
+    // should compile
+    check("""(Some(5): Any) match {
+      case Some(5) => 12
+      case None => 25
+    }
+    """)
+
+    check("""object Test { case class Test3(i: Int) }""")
+  }
 }
