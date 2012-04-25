@@ -110,14 +110,14 @@ class LinterPlugin(val global: Global) extends Plugin {
       def warnCompanionClassUsage(tree: Tree): Boolean = {
         val sym = tree.symbol
 
-        val condition =
+        val condition = (
           sym.isModule &&
           sym.companionClass.isCaseClass &&
 
           // there's a spurious auto-generated reference inside of the
           // companion object itself in its `readResolve`, so we
           // don't report inside of the companion object itself
-          !moduleStack.contains(sym)
+          !moduleStack.contains(sym))
 
         if (condition)
           unit.warning(tree.pos, Warnings.SuspiciousCompanionObjectUse)
