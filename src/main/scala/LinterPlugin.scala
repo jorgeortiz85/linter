@@ -66,6 +66,8 @@ class LinterPlugin(val global: Global) extends Plugin {
         selector.name == nme.WILDCARD && selector.renamePos == -1
       }
 
+      var moduleStack: List[Symbol] = Nil
+
       override def traverse(tree: Tree): Unit = tree match {
         case Apply(eqeq @ Select(lhs, nme.EQ), List(rhs))
             if methodImplements(eqeq.symbol, Object_==) && !(isSubtype(lhs, rhs) || isSubtype(rhs, lhs)) =>
@@ -86,9 +88,47 @@ class LinterPlugin(val global: Global) extends Plugin {
             unit.warning(get.pos, "Calling .get on Option will throw an exception if the Option is None.")
           }
 
+        // keep track of the module definition we are inside of
+        case m: ModuleDef =>
+          val oldStack = moduleStack
+
+          moduleStack ::= m.symbol
+          m.children.foreach(super.traverse)
+          moduleStack = oldStack
+
+        case _: Ident =>
+          warnCompanionClassUsage(tree)
+
+        case sel: Select =>
+          if (!warnCompanionClassUsage(tree))
+            super.traverse(sel.qualifier)
+
         case _ =>
           super.traverse(tree)
       }
+
+      def warnCompanionClassUsage(tree: Tree): Boolean = {
+        val sym = tree.symbol
+
+        val condition = (
+          sym.isModule &&
+          sym.companionClass.isCaseClass &&
+
+          // there's a spurious auto-generated reference inside of the
+          // companion object itself in its `readResolve`, so we
+          // don't report inside of the companion object itself
+          !moduleStack.contains(sym))
+
+        if (condition)
+          unit.warning(tree.pos, Warnings.SuspiciousCompanionObjectUse)
+
+        condition
+      }
+
     }
+  }
+
+  object Warnings {
+    val SuspiciousCompanionObjectUse = "Using the companion object of a case class here is probably not what you intended. You probably meant some instance of the case class instead."
   }
 }
