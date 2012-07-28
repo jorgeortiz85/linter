@@ -19,6 +19,7 @@ package com.foursquare.lint
 import scala.reflect.generic.Flags
 import scala.tools.nsc.{Global, Phase}
 import scala.tools.nsc.plugins.{Plugin, PluginComponent}
+import com.typesafe.config.ConfigFactory 
 
 class LinterPlugin(val global: Global) extends Plugin {
   import global._
@@ -26,7 +27,7 @@ class LinterPlugin(val global: Global) extends Plugin {
   val name = "linter"
   val description = ""
   val components = List[PluginComponent](LinterComponent)
-
+  
   private object LinterComponent extends PluginComponent {
     import global._
 
@@ -44,6 +45,7 @@ class LinterPlugin(val global: Global) extends Plugin {
 
     class LinterTraverser(unit: CompilationUnit) extends Traverser {
       import definitions.{AnyClass, ObjectClass, Object_==, OptionClass, SeqClass}
+      import LinterSeverity._
 
       val JavaConversionsModule: Symbol = definitions.getModule("scala.collection.JavaConversions")
       val SeqLikeClass: Symbol = definitions.getClass("scala.collection.SeqLike")
@@ -66,28 +68,41 @@ class LinterPlugin(val global: Global) extends Plugin {
         selector.name == nme.WILDCARD && selector.renamePos == -1
       }
       
+      /**
+       * Apply a warning or an error to some position in the code being linted
+       */
+      def annotateUnit(pos: Position, message: String, severity: LinterSeverity.Value): Unit = severity match {
+        case WARN  => unit.warning(pos, message)
+        case ERROR => unit.error(pos, message)
+      }
+      
       override def traverse(tree: Tree): Unit = tree match {
         case Apply(eqeq @ Select(lhs, nme.EQ), List(rhs))
             if methodImplements(eqeq.symbol, Object_==) && !(isSubtype(lhs, rhs) || isSubtype(rhs, lhs)) =>
           val warnMsg = "Comparing with == on instances of different types (%s, %s) will probably return false."
           unit.warning(eqeq.pos, warnMsg.format(lhs.tpe.widen, rhs.tpe.widen))
+          // TODO - use annotateUnit right here
 
+          // TODO - replace this with an implementation of the blacklist from our Config
         case Import(pkg, selectors)
             if pkg.symbol == JavaConversionsModule && selectors.exists(isGlobalImport) =>
           unit.warning(pkg.pos, "Conversions in scala.collection.JavaConversions._ are dangerous.")
         
+          // TODO - respect the whitelist exceptions
         case Import(pkg, selectors)
-            if selectors.exists(isGlobalImport) =>
-          unit.warning(pkg.pos, "Wildcard imports should be avoided.  Favor import selector clauses.")
+            if LinterConfig.packageWildcardWhitelistCheckEnabled && selectors.exists(isGlobalImport) =>
+            annotateUnit(pkg.pos, "Wildcard imports should be avoided.  Favor import selector clauses.", LinterConfig.packageWildcardWhitelistSeverity)
 
         case Apply(contains @ Select(seq, _), List(target))
             if methodImplements(contains.symbol, SeqLikeContains) && !(target.tpe <:< SeqMemberType(seq.tpe)) =>
           val warnMsg = "SeqLike[%s].contains(%s) will probably return false."
           unit.warning(contains.pos, warnMsg.format(SeqMemberType(seq.tpe), target.tpe.widen))
+          // TODO - use annotateUnit right here
 
         case get @ Select(_, nme.get) if methodImplements(get.symbol, OptionGet) =>
           if (!get.pos.source.path.contains("src/test")) {
             unit.warning(get.pos, "Calling .get on Option will throw an exception if the Option is None.")
+            // TODO - use annotateUnit right here
           }
 
         case _ =>
@@ -95,4 +110,34 @@ class LinterPlugin(val global: Global) extends Plugin {
       }
     }
   }
+}
+
+
+/**
+ * <p>Configuration class for running (or not) different lint checks</p>
+ * <p>As a library, linter defaults to including the src/main/resources/reference.conf settings
+ * which are override-able by an including application.</p>
+ */
+object LinterConfig {
+  
+  val config = ConfigFactory.load("linter")
+  config.checkValid(ConfigFactory.defaultReference(), "linter")
+  
+  val packageWildcardWhitelistCheckEnabled = config.getBoolean("linter.package.wildcard.whitelist.checkEnabled")
+  val packageWildcardWhitelistPackages = config.getStringList("linter.package.wildcard.whitelist.packages")
+  val packageWildcardWhitelistSeverity = LinterSeverity.withName(config.getString("linter.package.wildcard.whitelist.severity"))
+}
+
+/**
+ * Enumeration that models the different compile-time notifications Linter
+ * can alert the developer to based on configuration of the different
+ * types of lint checks.
+ * 
+ * These severities are a subset of the available notification functions on
+ * the @scala.tools.nsc.CompilationUnits$CompilationUnit
+ */
+object LinterSeverity extends Enumeration {
+  type LinterSeverity = Value
+  val WARN = Value("warn")
+  val ERROR = Value("error")
 }
