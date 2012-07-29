@@ -92,7 +92,16 @@ class LinterPlugin(val global: Global) extends Plugin {
         
           // TODO - respect the whitelist exceptions
         case Import(pkg, selectors)
-            if packageWildcardWhitelistCheckEnabled && selectors.exists(isGlobalImport) =>
+            if packageWildcardWhitelistCheckEnabled 
+            && selectors.exists(isGlobalImport) 
+            
+            /* For a statement like "import java.util._", 
+               pkg.symbol = "util"
+               pkg.class = class scala.reflect.generic.Trees$Select
+               We need to figure out how to get the "ancestor symbol(s)" of pkg to do string matching on the whole package name
+             
+             && !(packageWildcardWhitelistPackages.contains(pkg.symbol)) */ =>
+            println("The class of pkg is " + pkg.getClass)
             annotateUnit(pkg.pos, "Wildcard imports should be avoided.  Favor import selector clauses.", packageWildcardWhitelistSeverity)
 
         case Apply(contains @ Select(seq, _), List(target))
