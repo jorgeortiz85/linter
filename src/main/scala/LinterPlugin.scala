@@ -19,6 +19,7 @@ package com.foursquare.lint
 import scala.reflect.generic.Flags
 import scala.tools.nsc.{Global, Phase}
 import scala.tools.nsc.plugins.{Plugin, PluginComponent}
+import com.foursquare.lint.LinterConfig._
 
 class LinterPlugin(val global: Global) extends Plugin {
   import global._
