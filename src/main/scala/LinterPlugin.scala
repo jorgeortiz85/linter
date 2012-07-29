@@ -19,7 +19,6 @@ package com.foursquare.lint
 import scala.reflect.generic.Flags
 import scala.tools.nsc.{Global, Phase}
 import scala.tools.nsc.plugins.{Plugin, PluginComponent}
-import com.typesafe.config.ConfigFactory 
 
 class LinterPlugin(val global: Global) extends Plugin {
   import global._
@@ -113,20 +112,6 @@ class LinterPlugin(val global: Global) extends Plugin {
 }
 
 
-/**
- * <p>Configuration class for running (or not) different lint checks</p>
- * <p>As a library, linter defaults to including the src/main/resources/reference.conf settings
- * which are override-able by an including application.</p>
- */
-object LinterConfig {
-  
-  val config = ConfigFactory.load("linter")
-  config.checkValid(ConfigFactory.defaultReference(), "linter")
-  
-  val packageWildcardWhitelistCheckEnabled = config.getBoolean("linter.package.wildcard.whitelist.checkEnabled")
-  val packageWildcardWhitelistPackages = config.getStringList("linter.package.wildcard.whitelist.packages")
-  val packageWildcardWhitelistSeverity = LinterSeverity.withName(config.getString("linter.package.wildcard.whitelist.severity"))
-}
 
 /**
  * Enumeration that models the different compile-time notifications Linter
