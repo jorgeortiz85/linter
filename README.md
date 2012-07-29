@@ -17,7 +17,11 @@ Or, until published:
 
 Optionally, run `sbt console` in this project to see it in action.
 
-## Currently suported warnings
+## Currently supported warnings
+
+Note: for configuration documentation, unless otherwise stated, any "checkEnabled" configuration option
+is one of {"true", "false"} and any severity configuration option is one of {"warn", "error"}.
+Configuration documentation examples show the default settings that ship with this linter library.
 
 ### Unsafe `==`
 
@@ -26,12 +30,20 @@ Optionally, run `sbt console` in this project to see it in action.
                   Nil == None
                       ^
 
+    Configuration:
+        linter.eqeq.checkEnabled=true
+        linter.eqeq.severity=error
+
 ### Unsafe `contains`
 
     scala> List(1, 2, 3).contains("4")
     <console>:29: warning: SeqLike[Int].contains(java.lang.String) will probably return false.
                   List(1, 2, 3).contains("4")
                                 ^
+
+    Configuration:
+        linter.seq.contains.checkEnabled=true
+        linter.seq.contains.severity=warn
 
 
 ### Wildcard import from `scala.collection.JavaConversions`
@@ -41,12 +53,20 @@ Optionally, run `sbt console` in this project to see it in action.
            import scala.collection.JavaConversions._
                                    ^
 
+    Configuration:
+        None at present
+
 ### Any and all wildcard imports
 
     scala> import scala.collection.JavaConversions._
     <console>:10: warning: Wildcard imports should be avoided.
            import scala.reflect.generic._
 
+
+    Configuration:
+        linter.package.wildcard.whitelist.checkEnabled=true
+        linter.package.wildcard.whitelist.severity=warn
+        linter.package.wildcard.whitelist.packages=[]
 
 ### Calling `Option#get`
 
@@ -55,11 +75,24 @@ Optionally, run `sbt console` in this project to see it in action.
                   Option(1).get
                             ^
 
+    Configuration:
+        linter.option.get.checkEnabled=true
+        linter.option.get.severity=warn
+
+## Configuring Linter
+
+Linter is configured with the com.typesafe.config library (https://github.com/typesafehub/config)
+
+In your application, you can override any of the configuration options from these locations (in priority-respecting order):
+* system properties
+* application.conf available on the classpath
+* application.json available on the classpath
+* application.properties available on the classpath
+
 ## Future Work
 
 * Add more warnings
-* Pick and choose which warnings you want
-* Choose whether they should be warnings or errors
+* Support "blacklist"ing imports and re-write the scala.collection.JavaCollections check with that mechanism
 
 ### Ideas for new warnings
 
