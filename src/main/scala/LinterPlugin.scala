@@ -19,7 +19,6 @@ package com.foursquare.lint
 import scala.reflect.generic.Flags
 import scala.tools.nsc.{Global, Phase}
 import scala.tools.nsc.plugins.{Plugin, PluginComponent}
-import com.foursquare.lint.LinterConfig._
 
 class LinterPlugin(val global: Global) extends Plugin {
   import global._
@@ -46,6 +45,7 @@ class LinterPlugin(val global: Global) extends Plugin {
     class LinterTraverser(unit: CompilationUnit) extends Traverser {
       import definitions.{AnyClass, ObjectClass, Object_==, OptionClass, SeqClass}
       import LinterSeverity._
+      import LinterConfig._
 
       val JavaConversionsModule: Symbol = definitions.getModule("scala.collection.JavaConversions")
       val SeqLikeClass: Symbol = definitions.getClass("scala.collection.SeqLike")
@@ -114,18 +114,3 @@ class LinterPlugin(val global: Global) extends Plugin {
   }
 }
 
-
-
-/**
- * Enumeration that models the different compile-time notifications Linter
- * can alert the developer to based on configuration of the different
- * types of lint checks.
- * 
- * These severities are a subset of the available notification functions on
- * the @scala.tools.nsc.CompilationUnits$CompilationUnit
- */
-object LinterSeverity extends Enumeration {
-  type LinterSeverity = Value
-  val WARN = Value("warn")
-  val ERROR = Value("error")
-}

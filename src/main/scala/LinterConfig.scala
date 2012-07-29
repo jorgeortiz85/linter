@@ -8,7 +8,7 @@ import com.typesafe.config.ConfigFactory
  * which are override-able by an including application.</p>
  */
 object LinterConfig {
-  
+
   val config = ConfigFactory.load("linter")
   config.checkValid(ConfigFactory.defaultReference(), "linter")
   
