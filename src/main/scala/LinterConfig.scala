@@ -21,4 +21,7 @@ object LinterConfig {
   
   val seqContainsCheckEnabled = config.getBoolean("linter.seq.contains.checkEnabled")
   val seqContainsSeverity = LinterSeverity.withName(config.getString("linter.seq.contains.severity"))
+  
+  val optionGetCheckEnabled = config.getBoolean("linter.option.get.checkEnabled")
+  val optionGetSeverity = LinterSeverity.withName(config.getString("linter.option.get.severity"))
 }

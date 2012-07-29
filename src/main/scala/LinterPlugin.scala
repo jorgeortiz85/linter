@@ -102,11 +102,11 @@ class LinterPlugin(val global: Global) extends Plugin {
           val warnMsg = "SeqLike[%s].contains(%s) will probably return false."
           annotateUnit(contains.pos, warnMsg.format(SeqMemberType(seq.tpe), target.tpe.widen), seqContainsSeverity)
 
-        case get @ Select(_, nme.get) if methodImplements(get.symbol, OptionGet) =>
-          if (!get.pos.source.path.contains("src/test")) {
-            unit.warning(get.pos, "Calling .get on Option will throw an exception if the Option is None.")
-            // TODO - use annotateUnit right here
-          }
+        case get @ Select(_, nme.get) 
+          if optionGetCheckEnabled
+          && methodImplements(get.symbol, OptionGet)
+          && !(get.pos.source.path.contains("src/test")) =>
+            annotateUnit(get.pos, "Calling .get on Option will throw an exception if the Option is None.", optionGetSeverity)
 
         case _ =>
           super.traverse(tree)
