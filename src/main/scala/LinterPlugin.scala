@@ -96,10 +96,11 @@ class LinterPlugin(val global: Global) extends Plugin {
             annotateUnit(pkg.pos, "Wildcard imports should be avoided.  Favor import selector clauses.", packageWildcardWhitelistSeverity)
 
         case Apply(contains @ Select(seq, _), List(target))
-            if methodImplements(contains.symbol, SeqLikeContains) && !(target.tpe <:< SeqMemberType(seq.tpe)) =>
+            if seqContainsCheckEnabled 
+            && methodImplements(contains.symbol, SeqLikeContains) 
+            && !(target.tpe <:< SeqMemberType(seq.tpe)) =>
           val warnMsg = "SeqLike[%s].contains(%s) will probably return false."
-          unit.warning(contains.pos, warnMsg.format(SeqMemberType(seq.tpe), target.tpe.widen))
-          // TODO - use annotateUnit right here
+          annotateUnit(contains.pos, warnMsg.format(SeqMemberType(seq.tpe), target.tpe.widen), seqContainsSeverity)
 
         case get @ Select(_, nme.get) if methodImplements(get.symbol, OptionGet) =>
           if (!get.pos.source.path.contains("src/test")) {

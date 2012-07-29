@@ -18,4 +18,7 @@ object LinterConfig {
   val packageWildcardWhitelistCheckEnabled = config.getBoolean("linter.package.wildcard.whitelist.checkEnabled")
   val packageWildcardWhitelistPackages = config.getStringList("linter.package.wildcard.whitelist.packages")
   val packageWildcardWhitelistSeverity = LinterSeverity.withName(config.getString("linter.package.wildcard.whitelist.severity"))
+  
+  val seqContainsCheckEnabled = config.getBoolean("linter.seq.contains.checkEnabled")
+  val seqContainsSeverity = LinterSeverity.withName(config.getString("linter.seq.contains.severity"))
 }
