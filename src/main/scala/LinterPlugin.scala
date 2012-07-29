@@ -77,11 +77,13 @@ class LinterPlugin(val global: Global) extends Plugin {
       }
       
       override def traverse(tree: Tree): Unit = tree match {
+        // eqeq check
         case Apply(eqeq @ Select(lhs, nme.EQ), List(rhs))
-            if methodImplements(eqeq.symbol, Object_==) && !(isSubtype(lhs, rhs) || isSubtype(rhs, lhs)) =>
+            if eqeqCheckEnabled 
+            && methodImplements(eqeq.symbol, Object_==) 
+            && !(isSubtype(lhs, rhs) || isSubtype(rhs, lhs)) =>
           val warnMsg = "Comparing with == on instances of different types (%s, %s) will probably return false."
-          unit.warning(eqeq.pos, warnMsg.format(lhs.tpe.widen, rhs.tpe.widen))
-          // TODO - use annotateUnit right here
+          annotateUnit(eqeq.pos, warnMsg.format(lhs.tpe.widen, rhs.tpe.widen), eqeqSeverity)
 
           // TODO - replace this with an implementation of the blacklist from our Config
         case Import(pkg, selectors)
@@ -90,8 +92,8 @@ class LinterPlugin(val global: Global) extends Plugin {
         
           // TODO - respect the whitelist exceptions
         case Import(pkg, selectors)
-            if LinterConfig.packageWildcardWhitelistCheckEnabled && selectors.exists(isGlobalImport) =>
-            annotateUnit(pkg.pos, "Wildcard imports should be avoided.  Favor import selector clauses.", LinterConfig.packageWildcardWhitelistSeverity)
+            if packageWildcardWhitelistCheckEnabled && selectors.exists(isGlobalImport) =>
+            annotateUnit(pkg.pos, "Wildcard imports should be avoided.  Favor import selector clauses.", packageWildcardWhitelistSeverity)
 
         case Apply(contains @ Select(seq, _), List(target))
             if methodImplements(contains.symbol, SeqLikeContains) && !(target.tpe <:< SeqMemberType(seq.tpe)) =>

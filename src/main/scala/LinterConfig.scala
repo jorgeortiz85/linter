@@ -12,6 +12,9 @@ object LinterConfig {
   val config = ConfigFactory.load("linter")
   config.checkValid(ConfigFactory.defaultReference(), "linter")
   
+  val eqeqCheckEnabled = config.getBoolean("linter.eqeq.checkEnabled")
+  val eqeqSeverity = LinterSeverity.withName(config.getString("linter.eqeq.severity"))
+  
   val packageWildcardWhitelistCheckEnabled = config.getBoolean("linter.package.wildcard.whitelist.checkEnabled")
   val packageWildcardWhitelistPackages = config.getStringList("linter.package.wildcard.whitelist.packages")
   val packageWildcardWhitelistSeverity = LinterSeverity.withName(config.getString("linter.package.wildcard.whitelist.severity"))
