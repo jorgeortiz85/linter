@@ -75,3 +75,5 @@ Feel free to implement these, or add your own ideas. Pull requests welcome!
 * Traversable#head, Traversable#last, Traversable#maxBy
 * Warn on shadowing variables, especially those of the same type
 * Warn on inexhaustive pattern matching
+* Warn about pattern matching companion objects of case classes instead of instances themselves
+* Warn when referencing members of `collection.mutable._` without explicit qualification
